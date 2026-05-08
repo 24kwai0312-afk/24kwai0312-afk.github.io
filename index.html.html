@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>실시간 캐치마인드</title>
+    <style>
+        body { font-family: 'Nanum Gothic', sans-serif; background-color: #f0f2f5; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+        .game-container { display: flex; background: white; padding: 20px; border-radius: 15px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); gap: 20px; }
+        
+        /* 캔버스 영역 */
+        .canvas-area { display: flex; flex-direction: column; align-items: center; }
+        canvas { border: 2px solid #333; background-color: #fff; cursor: crosshair; border-radius: 8px; }
+        .controls { margin-top: 10px; display: flex; gap: 10px; align-items: center; }
+        
+        /* 채팅 영역 */
+        .chat-area { width: 300px; display: flex; flex-direction: column; border-left: 2px solid #eee; padding-left: 20px; }
+        #chat-messages { flex-grow: 1; overflow-y: auto; border: 1px solid #ddd; padding: 10px; margin-bottom: 10px; border-radius: 5px; height: 400px; }
+        #chat-input { padding: 10px; border: 1px solid #ddd; border-radius: 5px; outline: none; }
+
+        button { padding: 8px 15px; border: none; border-radius: 5px; cursor: pointer; background: #4a90e2; color: white; transition: 0.3s; }
+        button:hover { background: #357abd; }
+        .btn-clear { background: #e74c3c; }
+    </style>
+</head>
+<body>
+
+<div class="game-container">
+    <div class="canvas-area">
+        <h2 id="status">캐치마인드! 대기 중...</h2>
+        <canvas id="gameCanvas" width="600" height="500"></canvas>
+        <div class="controls">
+            <input type="color" id="colorPicker" value="#000000">
+            <input type="range" id="lineWidth" min="1" max="20" value="5">
+            <button class="btn-clear" id="clearBtn">전체 지우기</button>
+        </div>
+    </div>
+
+    <div class="chat-area">
+        <div id="chat-messages">
+            <div><b>시스템:</b> 게임에 접속했습니다!</div>
+        </div>
+        <input type="text" id="chat-input" placeholder="정답 또는 메시지 입력...">
+    </div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const colorPicker = document.getElementById('colorPicker');
+    const lineWidth = document.getElementById('lineWidth');
+    const clearBtn = document.getElementById('clearBtn');
+    const chatInput = document.getElementById('chat-input');
+    const chatMessages = document.getElementById('chat-messages');
+
+    // 변수 설정
+    let drawing = false;
+    let socket = null;
+
+    // 서버 연결 시도 (실제 서버가 구동 중이어야 함)
+    try {
+        socket = io();
+    } catch(e) {
+        console.log("서버가 연결되지 않았습니다. 로컬 테스트 모드로 작동합니다.");
+    }
+
+    // --- 그림 그리기 로직 ---
+    function startDrawing(e) {
+        drawing = true;
+        draw(e);
+    }
+
+    function stopDrawing() {
+        drawing = false;
+        ctx.beginPath(); // 선 경로 초기화 (연결 끊기)
+        if(socket) socket.emit('stop_drawing');
+    }
+
+    function draw(e) {
+        if (!drawing) return;
+
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+
+        const drawData = {
+            x: x,
+            y: y,
+            color: colorPicker.value,
+            size: lineWidth.value
+        };
+
+        renderDraw(drawData);
+
+        // 서버로 좌표 전송
+        if(socket) socket.emit('drawing', drawData);
+    }
+
+    function renderDraw(data) {
+        ctx.lineWidth = data.size;
+        ctx.lineCap = 'round';
+        ctx.strokeStyle = data.color;
+
+        ctx.lineTo(data.x, data.y);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(data.x, data.y);
+    }
+
+    canvas.addEventListener('mousedown', startDrawing);
+    canvas.addEventListener('mousemove', draw);
+    canvas.addEventListener('mouseup', stopDrawing);
+
+    // 지우기 버튼
+    clearBtn.addEventListener('click', () => {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        if(socket) socket.emit('clear_canvas');
+    });
+
+    // --- 채팅 로직 ---
+    chatInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter' && chatInput.value.trim() !== "") {
+            const msg = chatInput.value;
+            appendMessage(`나: ${msg}`);
+            if(socket) socket.emit('message', msg);
+            chatInput.value = "";
+        }
+    });
+
+    function appendMessage(text) {
+        const msgDiv = document.createElement('div');
+        msgDiv.innerHTML = `<span>${text}</span>`;
+        chatMessages.appendChild(msgDiv);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    // --- 소켓 이벤트 수신 (서버에서 전달받음) ---
+    if(socket) {
+        socket.on('drawing', (data) => renderDraw(data));
+        socket.on('stop_drawing', () => ctx.beginPath());
+        socket.on('clear_canvas', () => ctx.clearRect(0, 0, canvas.width, canvas.height));
+        socket.on('message', (data) => appendMessage(`${data.id}: ${data.text}`));
+    }
+
+</script>
+</body>
+</html>
